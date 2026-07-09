@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/midi-event",
+    "crates/midilogd",
+    "crates/midi2smf",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/kazu728/midi"
+
+[workspace.dependencies]
+midi-event = { path = "crates/midi-event" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

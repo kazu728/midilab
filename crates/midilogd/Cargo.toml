@@ -1,0 +1,18 @@
+[package]
+name = "midilogd"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+midi-event.workspace = true
+serde_json.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+
+# ALSA sequencer is Linux-only; the daemon runtime is gated on this target so
+# the workspace still compiles on macOS (development host).
+[target.'cfg(target_os = "linux")'.dependencies]
+alsa = "0.9"
+libc = "0.2"
