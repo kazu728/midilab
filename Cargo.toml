@@ -4,6 +4,7 @@ members = [
     "crates/midi-event",
     "crates/midilogd",
     "crates/midi2smf",
+    "crates/midi-exporter",
 ]
 
 [workspace.package]

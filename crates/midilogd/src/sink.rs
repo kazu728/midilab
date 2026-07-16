@@ -9,7 +9,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use chrono::{Datelike, NaiveDate};
+use chrono::NaiveDate;
 use midi_event::Event;
 
 pub struct JsonlSink {
@@ -32,10 +32,7 @@ impl JsonlSink {
 
     /// `<root>/YYYY/MM/DD.jsonl` for the given day.
     pub fn path_for(&self, date: NaiveDate) -> PathBuf {
-        self.root
-            .join(format!("{:04}", date.year()))
-            .join(format!("{:02}", date.month()))
-            .join(format!("{:02}.jsonl", date.day()))
+        midi_event::capture_path(&self.root, date)
     }
 
     /// Append one event to the file for `date`, rotating on day change and

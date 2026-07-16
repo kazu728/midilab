@@ -9,7 +9,9 @@
 //! Sessions are likewise a view: [`sessions`] derives them from silence gaps at
 //! read time, so the gap threshold stays tunable and is never written to disk.
 
+use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// One captured MIDI event — a single line in the append-only log.
@@ -83,6 +85,17 @@ pub enum Message {
     },
 }
 
+/// On-disk location of the capture log for `date`: `<root>/YYYY/MM/DD.jsonl`.
+///
+/// The append log is partitioned by local date. The writer and every reader
+/// must agree on this layout byte-for-byte, so it lives here beside the line
+/// schema instead of being reimplemented at each end.
+pub fn capture_path(root: &Path, date: NaiveDate) -> PathBuf {
+    root.join(format!("{:04}", date.year()))
+        .join(format!("{:02}", date.month()))
+        .join(format!("{:02}.jsonl", date.day()))
+}
+
 /// Split events into sessions, starting a new one whenever the monotonic gap to
 /// the previous event exceeds `gap`. Returns borrowed slices in input order;
 /// the input is expected in log (append) order. A backwards step in
@@ -117,6 +130,15 @@ mod tests {
             group: 0,
             msg,
         }
+    }
+
+    #[test]
+    fn capture_path_layout() {
+        let p = capture_path(
+            Path::new("capture"),
+            NaiveDate::from_ymd_opt(2026, 7, 9).unwrap(),
+        );
+        assert_eq!(p, Path::new("capture/2026/07/09.jsonl"));
     }
 
     #[test]
