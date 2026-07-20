@@ -10,7 +10,7 @@ members = [
 [workspace.package]
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/kazu728/midi"
+repository = "https://github.com/kazu728/midilab"
 
 [workspace.dependencies]
 midi-event = { path = "crates/midi-event" }

@@ -10,8 +10,8 @@
 #     midilogd = final.rustPlatform.buildRustPackage {
 #       pname = "midilogd";
 #       version = "0.1.0";
-#       src = inputs.midi;                 # this repository
-#       cargoLock.lockFile = "${inputs.midi}/Cargo.lock";
+#       src = inputs.midilab;              # this repository
+#       cargoLock.lockFile = "${inputs.midilab}/Cargo.lock";
 #       buildAndTestSubdir = "crates/midilogd";
 #       nativeBuildInputs = [ final.pkg-config ];
 #       buildInputs = [ final.alsa-lib ];  # alsa-sys links libasound
