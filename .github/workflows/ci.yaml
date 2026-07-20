@@ -1,0 +1,19 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # midilogd links libasound via alsa-sys; the exporter and shared crates
+      # do not, but the workspace build pulls it in.
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run: cargo test --workspace

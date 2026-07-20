@@ -1,0 +1,23 @@
+[package]
+name = "midi-exporter"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+midi-event.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+clap.workspace = true
+opentelemetry = "0.32"
+opentelemetry_sdk = "0.32"
+opentelemetry-otlp = { version = "0.32", default-features = false, features = [
+    "metrics",
+    "http-proto",
+    "reqwest-blocking-client",
+] }
+signal-hook = "0.3"
+
+[dev-dependencies]
+opentelemetry_sdk = { version = "0.32", features = ["testing"] }

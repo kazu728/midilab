@@ -8,8 +8,8 @@ repository.workspace = true
 [dependencies]
 midi-event.workspace = true
 serde_json.workspace = true
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-clap = { version = "4", features = ["derive"] }
+chrono.workspace = true
+clap.workspace = true
 
 # ALSA sequencer is Linux-only; the daemon runtime is gated on this target so
 # the workspace still compiles on macOS (development host).
