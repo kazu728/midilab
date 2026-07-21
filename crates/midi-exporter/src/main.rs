@@ -80,11 +80,17 @@ fn run(args: &Args) -> Result<(), String> {
         .map_err(|e| format!("attaching to {}: {e}", args.capture_dir.display()))?;
 
     while !shutdown.load(Ordering::Relaxed) {
-        let events = tail
-            .poll(Local::now().date_naive())
-            .map_err(|e| format!("reading {}: {e}", args.capture_dir.display()))?;
-        for event in &events {
-            piano.observe(event);
+        // A transient read error (permissions, EIO, fd exhaustion) must not
+        // kill the exporter: on restart it skips the current file's backlog, so
+        // exiting here would drop every event until the process comes back. Log
+        // it and retry on the next tick.
+        match tail.poll(Local::now().date_naive()) {
+            Ok(events) => {
+                for event in &events {
+                    piano.observe(event);
+                }
+            }
+            Err(e) => eprintln!("reading {}: {e}", args.capture_dir.display()),
         }
         std::thread::sleep(POLL_INTERVAL);
     }
