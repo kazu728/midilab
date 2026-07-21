@@ -14,11 +14,12 @@ use midi_event::Event;
 
 pub struct Tail {
     dir: PathBuf,
-    current: Option<OpenDay>,
+    /// Date of the file currently followed. Only ever advances forward.
+    date: NaiveDate,
+    open: Option<OpenFile>,
 }
 
-struct OpenDay {
-    date: NaiveDate,
+struct OpenFile {
     path: PathBuf,
     file: File,
     /// Bytes after the last newline seen; a line is parsed only once complete.
@@ -30,46 +31,71 @@ impl Tail {
     /// trailing unterminated line is kept pending so it still parses once
     /// midilogd finishes writing it.
     pub fn new(dir: PathBuf, today: NaiveDate) -> io::Result<Self> {
-        let mut tail = Self { dir, current: None };
+        let mut tail = Self {
+            dir,
+            date: today,
+            open: None,
+        };
         if let Some(mut open) = tail.try_open(today)? {
             open.skip_existing()?;
-            tail.current = Some(open);
+            tail.open = Some(open);
         }
         Ok(tail)
     }
 
-    /// Read every complete line appended since the last call. On a date change
-    /// the previous file is drained before switching, so nothing written just
-    /// before midnight is lost; until the new day's file exists the old one
-    /// stays watched.
+    /// Read every complete line appended since the last poll.
+    ///
+    /// The tracked date only moves forward, and only once a later day's file
+    /// exists — the reliable sign that midilogd has rotated, since its own
+    /// clock (not the exporter's) picks the file. The old file is drained one
+    /// last time at that point, so an event written just before midnight is
+    /// never lost; a backward clock step is ignored rather than replaying an
+    /// already-counted file.
     pub fn poll(&mut self, today: NaiveDate) -> io::Result<Vec<Event>> {
         let mut events = Vec::new();
-        match &mut self.current {
-            None => {
-                // The file appeared after we attached: everything in it is new.
-                if let Some(mut open) = self.try_open(today)? {
-                    open.read_appended(&mut events)?;
-                    self.current = Some(open);
-                }
-            }
-            Some(open) => {
-                open.read_appended(&mut events)?;
-                if open.date != today
-                    && let Some(mut next) = self.try_open(today)?
-                {
-                    next.read_appended(&mut events)?;
-                    self.current = Some(next);
-                }
-            }
+        self.read_current(&mut events)?;
+        while today > self.date && self.later_file_exists(today) {
+            self.read_current(&mut events)?; // final drain before switching
+            self.date = self.date.succ_opt().unwrap_or(today);
+            self.open = None;
+            self.read_current(&mut events)?; // pick up the new day's file
         }
         Ok(events)
     }
 
-    fn try_open(&self, date: NaiveDate) -> io::Result<Option<OpenDay>> {
+    /// Open the file for the tracked date if it has appeared, then read every
+    /// complete line appended since the last read.
+    fn read_current(&mut self, events: &mut Vec<Event>) -> io::Result<()> {
+        if self.open.is_none() {
+            self.open = self.try_open(self.date)?;
+        }
+        if let Some(open) = &mut self.open {
+            open.read_appended(events)?;
+        }
+        Ok(())
+    }
+
+    /// Whether any day after the tracked date, up to `today`, already has a
+    /// file — the signal that midilogd has moved on and the current file is
+    /// final.
+    fn later_file_exists(&self, today: NaiveDate) -> bool {
+        let mut date = self.date;
+        while let Some(next) = date.succ_opt() {
+            if next > today {
+                return false;
+            }
+            if midi_event::capture_path(&self.dir, next).exists() {
+                return true;
+            }
+            date = next;
+        }
+        false
+    }
+
+    fn try_open(&self, date: NaiveDate) -> io::Result<Option<OpenFile>> {
         let path = midi_event::capture_path(&self.dir, date);
         match File::open(&path) {
-            Ok(file) => Ok(Some(OpenDay {
-                date,
+            Ok(file) => Ok(Some(OpenFile {
                 path,
                 file,
                 partial: Vec::new(),
@@ -80,7 +106,7 @@ impl Tail {
     }
 }
 
-impl OpenDay {
+impl OpenFile {
     /// Consume the existing contents without emitting events, leaving the
     /// cursor at EOF and any trailing partial line pending.
     fn skip_existing(&mut self) -> io::Result<()> {
@@ -132,12 +158,8 @@ mod tests {
         dir
     }
 
-    fn day_path(dir: &Path, date: NaiveDate) -> PathBuf {
-        midi_event::capture_path(dir, date)
-    }
-
     fn append(dir: &Path, date: NaiveDate, text: &str) {
-        let path = day_path(dir, date);
+        let path = midi_event::capture_path(dir, date);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut file = fs::OpenOptions::new()
             .create(true)
@@ -166,6 +188,11 @@ mod tests {
 
     const D1: NaiveDate = NaiveDate::from_ymd_opt(2026, 7, 11).unwrap();
     const D2: NaiveDate = NaiveDate::from_ymd_opt(2026, 7, 12).unwrap();
+    const D3: NaiveDate = NaiveDate::from_ymd_opt(2026, 7, 13).unwrap();
+
+    fn mono(events: &[Event]) -> Vec<u64> {
+        events.iter().map(|e| e.t_mono_ns).collect()
+    }
 
     #[test]
     fn attach_skips_existing_and_sees_appends() {
@@ -269,6 +296,48 @@ mod tests {
         let events = tail.poll(D2).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].t_mono_ns, 4);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_first_written_just_before_midnight_is_not_lost() {
+        // Attached on D1 before its file exists; the very first event lands on
+        // D1 in the window between the last D1 poll and the clock reaching D2.
+        let dir = scratch("pre_midnight");
+        let mut tail = Tail::new(dir.clone(), D1).unwrap();
+        assert!(tail.poll(D1).unwrap().is_empty());
+
+        append(&dir, D1, &line(1));
+        assert_eq!(mono(&tail.poll(D2).unwrap()), vec![1]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn backward_clock_step_does_not_replay() {
+        let dir = scratch("clock_back");
+        append(&dir, D1, "");
+        let mut tail = Tail::new(dir.clone(), D1).unwrap();
+
+        append(&dir, D1, &line(1));
+        append(&dir, D2, &line(2));
+        assert_eq!(mono(&tail.poll(D2).unwrap()), vec![1, 2]);
+
+        // Clock steps back to D1: already-counted files must not be replayed.
+        assert!(tail.poll(D1).unwrap().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn catches_up_across_a_silent_day() {
+        // D2 has no file (nobody played); the exporter wakes with today at D3
+        // and must still read D1's tail and D3 without stalling on the gap.
+        let dir = scratch("silent_day");
+        append(&dir, D1, "");
+        let mut tail = Tail::new(dir.clone(), D1).unwrap();
+
+        append(&dir, D1, &line(1));
+        append(&dir, D3, &line(3));
+        assert_eq!(mono(&tail.poll(D3).unwrap()), vec![1, 3]);
         let _ = fs::remove_dir_all(&dir);
     }
 }
