@@ -1,15 +1,14 @@
 //! Project captured events onto the three OTel instruments.
 //!
 //! Only `note_on` with a non-zero velocity counts as a keystroke (`vel == 0`
-//! is the running-status note-off convention). Session time follows the same
-//! silence-gap rule as [`midi_event::sessions`], applied incrementally: each
-//! inter-event gap of at most `gap` is added as played time, so the counter's
-//! per-session total equals that view's last-minus-first span. A backwards
-//! monotonic step (reboot) is a boundary there too, and adds nothing.
+//! is the running-status note-off convention). Session time applies
+//! [`midi_event::SessionGap`] — the same rule [`midi_event::sessions`] groups
+//! by — incrementally: each in-session advance is added as played time, so the
+//! counter's per-session total equals that view's last-minus-first span.
 
 use std::time::Duration;
 
-use midi_event::{Event, Message};
+use midi_event::{Event, Message, SessionGap};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 
@@ -20,7 +19,7 @@ pub struct PianoMetrics {
     keys: Counter<u64>,
     velocity: Histogram<f64>,
     session: Counter<f64>,
-    gap_ns: u64,
+    gap: SessionGap,
     prev_t_mono_ns: Option<u64>,
 }
 
@@ -33,15 +32,14 @@ impl PianoMetrics {
                 .with_boundaries(VELOCITY_BOUNDARIES.to_vec())
                 .build(),
             session: meter.f64_counter("piano.session").with_unit("s").build(),
-            gap_ns: gap.as_nanos().min(u64::MAX as u128) as u64,
+            gap: SessionGap::new(gap),
             prev_t_mono_ns: None,
         }
     }
 
     pub fn observe(&mut self, event: &Event) {
         if let Some(prev) = self.prev_t_mono_ns
-            && let Some(dt) = event.t_mono_ns.checked_sub(prev)
-            && dt <= self.gap_ns
+            && let Some(dt) = self.gap.played(prev, event.t_mono_ns)
         {
             self.session.add(dt as f64 / 1e9, &[]);
         }

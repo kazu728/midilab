@@ -96,18 +96,46 @@ pub fn capture_path(root: &Path, date: NaiveDate) -> PathBuf {
         .join(format!("{:02}.jsonl", date.day()))
 }
 
-/// Split events into sessions, starting a new one whenever the monotonic gap to
-/// the previous event exceeds `gap`. Returns borrowed slices in input order;
-/// the input is expected in log (append) order. A backwards step in
-/// [`Event::t_mono_ns`] means a reboot happened between the two lines, so it is
-/// always a session boundary regardless of `gap`.
+/// The silence-gap rule that delimits a playing session. Consecutive events
+/// stay in the same session while the monotonic clock advances by at most
+/// `gap`; a longer advance is silence between sessions, and a backwards step is
+/// a reboot (the monotonic clock restarts from zero). Both begin a new session.
+///
+/// This is the single owner of the boundary rule: [`sessions`] groups by it and
+/// the exporter accumulates played time with it, so the two never drift.
+#[derive(Clone, Copy)]
+pub struct SessionGap {
+    gap_ns: u64,
+}
+
+impl SessionGap {
+    pub fn new(gap: Duration) -> Self {
+        Self {
+            gap_ns: gap.as_nanos().min(u64::MAX as u128) as u64,
+        }
+    }
+
+    /// The monotonic nanoseconds from `prev` to `cur` that count as continuous
+    /// playing, or `None` when the step crosses a session boundary.
+    pub fn played(&self, prev: u64, cur: u64) -> Option<u64> {
+        match cur.checked_sub(prev) {
+            Some(dt) if dt <= self.gap_ns => Some(dt),
+            _ => None,
+        }
+    }
+}
+
+/// Split events into sessions by [`SessionGap`]. Returns borrowed slices in
+/// input order; the input is expected in log (append) order.
 pub fn sessions(events: &[Event], gap: Duration) -> Vec<&[Event]> {
-    let gap_ns = gap.as_nanos().min(u64::MAX as u128) as u64;
+    let gap = SessionGap::new(gap);
     let mut out = Vec::new();
     let mut start = 0;
     for i in 1..events.len() {
-        let (prev, cur) = (events[i - 1].t_mono_ns, events[i].t_mono_ns);
-        if cur < prev || cur - prev > gap_ns {
+        if gap
+            .played(events[i - 1].t_mono_ns, events[i].t_mono_ns)
+            .is_none()
+        {
             out.push(&events[start..i]);
             start = i;
         }
@@ -267,6 +295,16 @@ mod tests {
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].len(), 2);
         assert_eq!(groups[1].len(), 2);
+    }
+
+    #[test]
+    fn session_gap_played_span_or_boundary() {
+        let s = 1_000_000_000u64;
+        let gap = SessionGap::new(Duration::from_secs(300));
+        assert_eq!(gap.played(0, 2 * s), Some(2 * s)); // within the gap
+        assert_eq!(gap.played(0, 301 * s), None); // silence beyond the gap
+        assert_eq!(gap.played(200, 100), None); // backwards step = reboot
+        assert_eq!(gap.played(5, 5), Some(0)); // no advance stays in-session
     }
 
     #[test]
