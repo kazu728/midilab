@@ -30,16 +30,11 @@ impl JsonlSink {
         }
     }
 
-    /// `<root>/YYYY/MM/DD.jsonl` for the given day.
-    pub fn path_for(&self, date: NaiveDate) -> PathBuf {
-        midi_event::capture_path(&self.root, date)
-    }
-
     /// Append one event to the file for `date`, rotating on day change and
     /// syncing to disk before returning.
     pub fn append(&mut self, event: &Event, date: NaiveDate) -> io::Result<()> {
         if self.open.as_ref().is_none_or(|o| o.date != date) {
-            let path = self.path_for(date);
+            let path = midi_event::capture_path(&self.root, date);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)?;
             }
