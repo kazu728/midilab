@@ -5,8 +5,9 @@
 //! replays history, so a restart shows up in Prometheus as an ordinary counter
 //! reset instead of a mid-replay ramp that `increase()` would double-count.
 
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Read};
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 
 use chrono::NaiveDate;
@@ -22,6 +23,10 @@ pub struct Tail {
 struct OpenFile {
     path: PathBuf,
     file: File,
+    /// Inode of `file`, to notice the path being replaced under us.
+    ino: u64,
+    /// Bytes consumed from `file`, to notice it being truncated under us.
+    read: u64,
     /// Bytes after the last newline seen; a line is parsed only once complete.
     partial: Vec<u8>,
 }
@@ -66,6 +71,13 @@ impl Tail {
     /// Open the file for the tracked date if it has appeared, then read every
     /// complete line appended since the last read.
     fn read_current(&mut self, events: &mut Vec<Event>) -> io::Result<()> {
+        let stale = match &self.open {
+            Some(open) => open.stale()?,
+            None => false,
+        };
+        if stale {
+            self.open = None; // truncated or replaced: re-open and re-read
+        }
         if self.open.is_none() {
             self.open = self.try_open(self.date)?;
         }
@@ -95,11 +107,16 @@ impl Tail {
     fn try_open(&self, date: NaiveDate) -> io::Result<Option<OpenFile>> {
         let path = midi_event::capture_path(&self.dir, date);
         match File::open(&path) {
-            Ok(file) => Ok(Some(OpenFile {
-                path,
-                file,
-                partial: Vec::new(),
-            })),
+            Ok(file) => {
+                let ino = file.metadata()?.ino();
+                Ok(Some(OpenFile {
+                    path,
+                    file,
+                    ino,
+                    read: 0,
+                    partial: Vec::new(),
+                }))
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e),
         }
@@ -111,7 +128,7 @@ impl OpenFile {
     /// cursor at EOF and any trailing partial line pending.
     fn skip_existing(&mut self) -> io::Result<()> {
         let mut buf = Vec::new();
-        self.file.read_to_end(&mut buf)?;
+        self.read += self.file.read_to_end(&mut buf)? as u64;
         let after_last_newline = buf
             .iter()
             .rposition(|&b| b == b'\n')
@@ -120,11 +137,25 @@ impl OpenFile {
         Ok(())
     }
 
+    /// Whether the file we hold is no longer the live one: the path now
+    /// resolves to a different inode (replaced), or it has shrunk below what we
+    /// have already read (truncated). A truncation that regrows past the old
+    /// offset before the next poll would be indistinguishable from ordinary
+    /// growth, but this log is appended a few KB/s at most, so the shrink is
+    /// always observed first.
+    fn stale(&self) -> io::Result<bool> {
+        match fs::metadata(&self.path) {
+            Ok(m) => Ok(m.ino() != self.ino || self.file.metadata()?.len() < self.read),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(true),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Parse every line completed since the last read into `events`. Bad lines
     /// are reported and skipped: this is a derived view, so losing one line is
     /// acceptable where killing the exporter is not.
     fn read_appended(&mut self, events: &mut Vec<Event>) -> io::Result<()> {
-        self.file.read_to_end(&mut self.partial)?;
+        self.read += self.file.read_to_end(&mut self.partial)? as u64;
         let mut start = 0;
         while let Some(offset) = self.partial[start..].iter().position(|&b| b == b'\n') {
             let line = &self.partial[start..start + offset];
@@ -338,6 +369,35 @@ mod tests {
         append(&dir, D1, &line(1));
         append(&dir, D3, &line(3));
         assert_eq!(mono(&tail.poll(D3).unwrap()), vec![1, 3]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn truncated_file_is_reread_from_its_new_start() {
+        let dir = scratch("truncate");
+        append(&dir, D1, &line(1));
+        let mut tail = Tail::new(dir.clone(), D1).unwrap();
+        append(&dir, D1, &line(2));
+        assert_eq!(mono(&tail.poll(D1).unwrap()), vec![2]);
+
+        // A stray logrotate truncates the file, then fresh events are written.
+        fs::write(midi_event::capture_path(&dir, D1), "").unwrap();
+        append(&dir, D1, &line(3));
+        assert_eq!(mono(&tail.poll(D1).unwrap()), vec![3]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn replaced_file_is_reopened() {
+        let dir = scratch("replaced");
+        append(&dir, D1, &line(1));
+        let mut tail = Tail::new(dir.clone(), D1).unwrap();
+
+        // The file is removed and recreated as a different inode. The open
+        // handle keeps the old inode alive, so the new file is genuinely other.
+        fs::remove_file(midi_event::capture_path(&dir, D1)).unwrap();
+        append(&dir, D1, &line(2));
+        assert_eq!(mono(&tail.poll(D1).unwrap()), vec![2]);
         let _ = fs::remove_dir_all(&dir);
     }
 }
