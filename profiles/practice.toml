@@ -1,0 +1,4 @@
+metronome_switch = "on"
+sequencer_tempo = 72
+metronome_volume = 6
+master_volume = 80
