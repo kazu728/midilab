@@ -1,19 +1,6 @@
-//! ALSA sequencer client: subscribe to the piano and stream every event into the
-//! sink, re-subscribing automatically when the device comes and goes.
+//! `System:Announce` handles USB replugging; queue timestamps are anchored to
+//! CLOCK_MONOTONIC so daemon latency does not enter the logged time.
 //!
-//! The daemon also subscribes to `System:Announce` (0:1) so that unplugging and
-//! replugging the USB piano — which can change its client:port — is handled by
-//! re-scanning and re-subscribing on the next `PortStart`, instead of silently
-//! going deaf (the failure mode of a plain `arecordmidi`).
-//!
-//! Timestamps come from an ALSA queue: the kernel stamps each event when it is
-//! delivered to our port, so daemon-side latency (per-event fsync, scheduling)
-//! never leaks into `t_mono_ns`. Queue time starts at zero, so it is anchored
-//! to CLOCK_MONOTONIC once at startup to keep the logged timebase boot-relative
-//! across daemon restarts.
-//!
-//! Compiled and exercised on Linux only.
-
 use std::path::Path;
 use std::time::Duration;
 
@@ -145,8 +132,6 @@ fn subscribe(seq: &Seq, sender: Addr, dest: Addr) -> Result<(), alsa::Error> {
     seq.subscribe_port(&sub)
 }
 
-/// Find a readable port whose client or port name contains `needle`
-/// (case-insensitive) and subscribe our capture port to it.
 fn try_subscribe(seq: &Seq, needle: &str, dest: Addr) -> Option<Addr> {
     let src = find_source(seq, needle)?;
     subscribe(seq, src, dest).ok()?;
@@ -181,9 +166,8 @@ fn port_alive(seq: &Seq, addr: Addr) -> bool {
     })
 }
 
-/// CLOCK_MONOTONIC in nanoseconds — a boot-relative, jump-free timebase for
-/// ordering and silence-gap detection. It survives process restarts (unlike a
-/// per-run `Instant`), resetting only on reboot.
+/// CLOCK_MONOTONIC in nanoseconds. Unlike a per-run `Instant`, it survives
+/// process restarts and resets only on reboot.
 fn monotonic_ns() -> u64 {
     let mut ts = libc::timespec {
         tv_sec: 0,

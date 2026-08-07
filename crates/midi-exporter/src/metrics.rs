@@ -1,10 +1,5 @@
-//! Project captured events onto the three OTel instruments.
-//!
-//! Only `note_on` with a non-zero velocity counts as a keystroke (`vel == 0`
-//! is the running-status note-off convention). Session time applies
-//! [`midi_event::SessionGap`] — the same rule [`midi_event::sessions`] groups
-//! by — incrementally: each in-session advance is added as played time, so the
-//! counter's per-session total equals that view's last-minus-first span.
+//! A non-zero-velocity note-on counts as a keystroke. Session time follows
+//! [`midi_event::SessionGap`] incrementally, matching [`midi_event::sessions`].
 
 use std::time::Duration;
 
@@ -90,7 +85,6 @@ mod tests {
         }
     }
 
-    /// Run `events` through PianoMetrics and return the flushed export.
     fn observe_all(events: &[Event], gap: Duration) -> Vec<ResourceMetrics> {
         let exporter = InMemoryMetricExporter::default();
         let provider = SdkMeterProvider::builder()
@@ -143,7 +137,7 @@ mod tests {
                 note_on(0, 21, 55),
                 note_on(S, 21, 60),
                 note_on(2 * S, 108, 127),
-                note_on(3 * S, 60, 0), // note-off convention: not a keystroke
+                note_on(3 * S, 60, 0),
                 note_off(4 * S, 21),
             ],
             Duration::from_secs(300),
@@ -151,7 +145,6 @@ mod tests {
 
         assert_eq!(u64_sum(&export, "piano.keys"), 3);
 
-        // Keys are labeled by zero-padded note number.
         let mut keys = with_metric(&export, "piano.keys", |data| match data {
             AggregatedMetrics::U64(MetricData::Sum(sum)) => sum
                 .data_points()
@@ -189,11 +182,11 @@ mod tests {
         let export = observe_all(
             &[
                 note_on(0, 21, 55),
-                note_on(2 * S, 21, 55),   // +2s
+                note_on(2 * S, 21, 55),
                 note_on(400 * S, 23, 55), // gap > 300s: new session, no add
-                note_on(403 * S, 23, 55), // +3s
-                note_on(10 * S, 24, 55),  // backwards = reboot: no add
-                note_on(11 * S, 24, 55),  // +1s
+                note_on(403 * S, 23, 55),
+                note_on(10 * S, 24, 55), // backwards = reboot: no add
+                note_on(11 * S, 24, 55),
             ],
             gap,
         );

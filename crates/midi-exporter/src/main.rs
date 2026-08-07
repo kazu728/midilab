@@ -1,6 +1,4 @@
-//! Tail the capture log and push OTLP metrics — a derived view of the JSONL
-//! truth, deliberately separate from the capture daemon so that no exporter
-//! failure can ever cost captured data.
+//! It is separate from capture so exporter failures cannot lose captured data.
 
 mod metrics;
 mod tail;

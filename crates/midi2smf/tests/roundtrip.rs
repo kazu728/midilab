@@ -1,6 +1,3 @@
-//! End-to-end: JSONL capture -> `midi2smf` binary -> SMF -> re-parsed with midly.
-//! Uses events from a real Roland piano capture (client 24:0, channel 0).
-
 use std::process::Command;
 
 use midly::{MidiMessage, Smf, TrackEventKind};
@@ -29,7 +26,7 @@ fn read_notes(mid: &[u8]) -> Vec<(u32, &'static str, u8, u8)> {
 
 #[test]
 fn projects_dump_events_losslessly() {
-    let s = 1_000_000_000u64; // 1s in ns
+    let s = 1_000_000_000u64;
     let jsonl = [
         (0u64, r#"{"kind":"note_on","ch":0,"note":21,"vel":55}"#),
         (1, r#"{"kind":"note_on","ch":0,"note":23,"vel":66}"#),
@@ -95,7 +92,6 @@ fn backwards_t_mono_ns_needs_session_split() {
     let output = dir.join(format!("midi2smf_reboot_{}.mid", std::process::id()));
     std::fs::write(&input, jsonl).unwrap();
 
-    // Projecting across the reboot would mix two timebases: explicit error.
     let out = Command::new(env!("CARGO_BIN_EXE_midi2smf"))
         .args(["--input", input.to_str().unwrap()])
         .args(["--output", output.to_str().unwrap()])

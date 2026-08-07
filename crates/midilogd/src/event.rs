@@ -1,18 +1,9 @@
-//! Faithful mapping from an ALSA sequencer event to the capture schema.
-//!
-//! Values are recorded as ALSA hands them over — a note-on with velocity 0 stays
-//! a `note_on`, pitch bend stays centered — because the log is the source of
-//! truth and any interpretation belongs to a later view. Messages not modeled
-//! explicitly are kept as [`Message::Other`], holding the MIDI 1.0 wire bytes
-//! ALSA emits for them, with two deliberate exceptions: real-time stream
-//! chatter (clock, tick, active sensing) is dropped as noise, and channel-voice
-//! values outside the 7-bit wire range (injectable via other sequencer clients,
-//! never sent by the piano) are dropped rather than silently truncated.
+//! Preserve wire values and unknown messages; drop real-time chatter and
+//! out-of-range channel-voice values instead of normalizing or truncating them.
 
 use alsa::seq::{Addr, EvCtrl, EvNote, Event, EventType, MidiEvent};
 use midi_event::Message;
 
-/// `"client:port"` of the event's source, e.g. `"24:0"`.
 pub fn source_of(ev: &Event) -> String {
     let Addr { client, port } = ev.get_source();
     format!("{client}:{port}")

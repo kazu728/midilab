@@ -1,8 +1,4 @@
-//! Project a captured JSONL session to a Standard MIDI File (Format 0).
-//!
-//! The log stores absolute capture time; SMF stores tempo-relative ticks. This
-//! tool applies a *fixed* tempo (no estimation) so the projection is a plain,
-//! reversible view — tempo inference is deliberately left to a later stage.
+//! Use a fixed tempo so the result remains a plain, reversible view.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -31,7 +27,7 @@ struct Args {
     #[arg(long, default_value_t = 300)]
     gap_secs: u64,
     /// Pulses per quarter note.
-    // SMF metrical timing is 15-bit; anything above would be silently masked.
+    // SMF metrical timing is 15-bit, hence the 32767 cap.
     #[arg(long, default_value_t = 480, value_parser = clap::value_parser!(u16).range(1..=32767))]
     ppq: u16,
     /// Fixed tempo applied to the whole projection.
@@ -74,9 +70,8 @@ fn run(args: &Args) -> Result<usize, String> {
     if selected.is_empty() {
         return Err("no events to project".into());
     }
-    // A backwards t_mono_ns mixes two timebases (reboot mid-log, or inputs out
-    // of order); projecting across it would produce garbage ticks. `sessions`
-    // always splits there, so per-session projection remains available.
+    // A backwards t_mono_ns mixes two timebases; `sessions` always splits
+    // there, so per-session projection stays available.
     if let Some(i) =
         (1..selected.len()).find(|&i| selected[i].t_mono_ns < selected[i - 1].t_mono_ns)
     {
@@ -202,7 +197,6 @@ fn to_midi(msg: &Message) -> Option<(u4, MidiMessage)> {
     })
 }
 
-/// ticks = dt_ns * ppq * bpm / 60e9, rounded to nearest.
 fn tick_of(dt_ns: u64, ppq: u16, bpm: u32) -> u64 {
     let num = dt_ns as u128 * ppq as u128 * bpm as u128;
     let den = 60_000_000_000u128;

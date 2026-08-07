@@ -1,9 +1,5 @@
-//! Append-only JSONL sink with per-day file rotation.
-//!
-//! Every line is fsync'd before returning, so an abrupt `kill -9` or power loss
-//! costs at most the in-flight event — never the whole day. This is the crux of
-//! why the capture is a raw append log rather than a single SMF finalized on
-//! exit (which loses everything if the writer dies).
+//! Each event is synced before return, so a crash can lose only the in-flight
+//! event; the raw log remains usable without finalizing an SMF on exit.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -62,8 +58,6 @@ impl JsonlSink {
     }
 }
 
-/// Whether `file` ends in the middle of a line: non-empty and not newline-
-/// terminated, the fingerprint of a write cut short by a crash.
 fn ends_mid_line(file: &mut File) -> io::Result<bool> {
     let len = file.seek(SeekFrom::End(0))?;
     if len == 0 {
@@ -124,15 +118,13 @@ mod tests {
         let d = NaiveDate::from_ymd_opt(2026, 7, 9).unwrap();
         let path = midi_event::capture_path(&dir, d);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        // A writer died mid-line: a record with no terminating newline.
         fs::write(&path, br#"{"t_mono_ns":1,"kind":"note"#).unwrap();
 
-        // A fresh writer appends a complete event.
         JsonlSink::new(&dir).append(&ev(2), d).unwrap();
 
         let body = fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = body.lines().collect();
-        assert_eq!(lines.len(), 2); // the torn remnant is now its own line
+        assert_eq!(lines.len(), 2);
         assert_eq!(serde_json::from_str::<Event>(lines[1]).unwrap(), ev(2));
         let _ = fs::remove_dir_all(&dir);
     }

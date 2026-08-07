@@ -1,26 +1,17 @@
-//! Shared event schema for the midilogd pipeline.
-//!
-//! The capture log is the source of truth: one JSON object per line, each a
-//! faithful record of a MIDI event carrying both a monotonic and a wall-clock
-//! timestamp. Values are stored as they arrive on the wire (7-bit velocity in a
-//! `u16`, centered pitch bend); any normalization to MIDI 2.0 widths is a
-//! downstream *view*, not something the logger bakes in.
-//!
-//! Sessions are likewise a view: [`sessions`] derives them from silence gaps at
-//! read time, so the gap threshold stays tunable and is never written to disk.
+//! Preserve wire values in the log; sessions are a derived silence-gap view, so
+//! normalization and threshold choices stay out of the on-disk data.
 
 use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// One captured MIDI event — a single line in the append-only log.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Event {
     /// Monotonic clock (CLOCK_MONOTONIC) at capture, in nanoseconds. Sole basis
-    /// for ordering and inter-event gaps; immune to wall-clock jumps (NTP). It
-    /// stalls during suspend and restarts from zero on reboot, so a backwards
-    /// step between consecutive lines marks a reboot (see [`sessions`]).
+    /// for ordering and inter-event gaps; immune to wall-clock jumps (NTP);
+    /// stalls during suspend and restarts from zero on reboot (see
+    /// [`sessions`]).
     pub t_mono_ns: u64,
     /// Wall-clock at capture, RFC 3339. Answers "when did I play this".
     pub t_wall: String,
@@ -29,7 +20,6 @@ pub struct Event {
     /// UMP group. Reserved for future MIDI 2.0 input; always 0 for MIDI 1.0.
     #[serde(default)]
     pub group: u8,
-    /// The message itself, tagged by `kind` on the wire.
     #[serde(flatten)]
     pub msg: Message,
 }
@@ -78,8 +68,7 @@ pub enum Message {
         raw: String,
     },
     /// Any other MIDI message, kept as hex of the wire bytes ALSA emits for it
-    /// so the log stays forward-compatible. Real-time stream chatter (clock,
-    /// tick, active sensing) is deliberately dropped at capture, not logged.
+    /// so the log stays forward-compatible.
     Other {
         raw: String,
     },
@@ -235,7 +224,7 @@ mod tests {
 
     #[test]
     fn sessions_split_on_gap() {
-        let s = 1_000_000_000u64; // 1 second in ns
+        let s = 1_000_000_000u64;
         let events = vec![
             ev(
                 0,

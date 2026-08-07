@@ -1,8 +1,5 @@
-//! midilogd — always-on ALSA sequencer capture daemon.
-//!
-//! Subscribes to the piano and appends every event to a crash-safe, wall-clock
-//! stamped JSONL log (`<capture-dir>/YYYY/MM/DD.jsonl`). The log is the source of
-//! truth; SMF/metrics/analysis are derived views (see the `midi2smf` crate).
+//! Captured events go to crash-safe daily JSONL; the log is the source of truth,
+//! while SMF, metrics, and analysis are derived views.
 
 #[cfg(any(target_os = "linux", test))]
 mod sink;

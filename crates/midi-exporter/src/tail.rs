@@ -1,9 +1,5 @@
-//! Follow the capture log as midilogd appends to it.
-//!
-//! The log is laid out as `<dir>/YYYY/MM/DD.jsonl` (local date, one JSON event
-//! per line). Attaching starts at the end of today's file: the exporter never
-//! replays history, so a restart shows up in Prometheus as an ordinary counter
-//! reset instead of a mid-replay ramp that `increase()` would double-count.
+//! Attach at today's EOF and advance across local-date files without replaying
+//! history, so exporter restarts behave as ordinary counter resets.
 
 use std::fs::{self, File};
 use std::io::{self, Read};
@@ -15,7 +11,7 @@ use midi_event::Event;
 
 pub struct Tail {
     dir: PathBuf,
-    /// Date of the file currently followed. Only ever advances forward.
+    /// Date of the file currently followed.
     date: NaiveDate,
     open: Option<OpenFile>,
 }
@@ -48,8 +44,6 @@ impl Tail {
         Ok(tail)
     }
 
-    /// Read every complete line appended since the last poll.
-    ///
     /// The tracked date only moves forward, and only once a later day's file
     /// exists — the reliable sign that midilogd has rotated, since its own
     /// clock (not the exporter's) picks the file. The old file is drained one
@@ -60,23 +54,21 @@ impl Tail {
         let mut events = Vec::new();
         self.read_current(&mut events)?;
         while today > self.date && self.later_file_exists(today) {
-            self.read_current(&mut events)?; // final drain before switching
+            self.read_current(&mut events)?;
             self.date = self.date.succ_opt().unwrap_or(today);
             self.open = None;
-            self.read_current(&mut events)?; // pick up the new day's file
+            self.read_current(&mut events)?;
         }
         Ok(events)
     }
 
-    /// Open the file for the tracked date if it has appeared, then read every
-    /// complete line appended since the last read.
     fn read_current(&mut self, events: &mut Vec<Event>) -> io::Result<()> {
         let stale = match &self.open {
             Some(open) => open.stale()?,
             None => false,
         };
         if stale {
-            self.open = None; // truncated or replaced: re-open and re-read
+            self.open = None;
         }
         if self.open.is_none() {
             self.open = self.try_open(self.date)?;
@@ -87,9 +79,8 @@ impl Tail {
         Ok(())
     }
 
-    /// Whether any day after the tracked date, up to `today`, already has a
-    /// file — the signal that midilogd has moved on and the current file is
-    /// final.
+    /// The signal that midilogd has moved on and the current file is final:
+    /// some later day up to `today` already has a file.
     fn later_file_exists(&self, today: NaiveDate) -> bool {
         let mut date = self.date;
         while let Some(next) = date.succ_opt() {
@@ -124,8 +115,7 @@ impl Tail {
 }
 
 impl OpenFile {
-    /// Consume the existing contents without emitting events, leaving the
-    /// cursor at EOF and any trailing partial line pending.
+    /// Leave the cursor at EOF and any trailing partial line pending.
     fn skip_existing(&mut self) -> io::Result<()> {
         let mut buf = Vec::new();
         self.read += self.file.read_to_end(&mut buf)? as u64;
@@ -151,9 +141,8 @@ impl OpenFile {
         }
     }
 
-    /// Parse every line completed since the last read into `events`. Bad lines
-    /// are reported and skipped: this is a derived view, so losing one line is
-    /// acceptable where killing the exporter is not.
+    /// Bad lines are reported and skipped: this is a derived view, so losing
+    /// one line is acceptable where killing the exporter is not.
     fn read_appended(&mut self, events: &mut Vec<Event>) -> io::Result<()> {
         self.read += self.file.read_to_end(&mut self.partial)? as u64;
         let mut start = 0;
@@ -380,7 +369,6 @@ mod tests {
         append(&dir, D1, &line(2));
         assert_eq!(mono(&tail.poll(D1).unwrap()), vec![2]);
 
-        // A stray logrotate truncates the file, then fresh events are written.
         fs::write(midi_event::capture_path(&dir, D1), "").unwrap();
         append(&dir, D1, &line(3));
         assert_eq!(mono(&tail.poll(D1).unwrap()), vec![3]);

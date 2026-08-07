@@ -21,9 +21,7 @@
 { pkgs, ... }:
 
 let
-  # Case-insensitive substring matched against ALSA client/port names.
   source = "Roland";
-  # Lives under StateDirectory (/var/lib/midilogd), owned by the service user.
   captureDir = "/var/lib/midilogd/capture";
 in
 {
