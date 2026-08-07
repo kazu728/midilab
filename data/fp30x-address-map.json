@@ -1,0 +1,203 @@
+{
+  "schema": "roland-sysex-map/v0",
+  "notice": "Not affiliated with or endorsed by Roland Corporation. Every entry whose `verified` list is empty is an unverified hypothesis: Roland's published FP-30X MIDI implementation documents no address map at all, so these addresses come from reverse engineering and still have to be confirmed against hardware.",
+  "device": {
+    "name": "Roland FP-30X",
+    "identity_family": "19 03",
+    "identity_member": "00 00",
+    "model_id": "00 00 00 28",
+    "device_id_default": "10",
+    "checksum": "roland7",
+    "corroborations": [
+      "bluebrother/fp30remote documents the same model ID 00 00 00 28 for the FP-30 (independent reverse engineering)",
+      "identity_family, identity_member and the reply's shape are from Roland's FP-30X MIDI Implementation (2021-08-01, v1.00)"
+    ]
+  },
+  "params": [
+    {
+      "name": "connection",
+      "write_address": "01 00 03 06",
+      "size": 1,
+      "encoding": "u7",
+      "enum": { "1": "open" },
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [],
+      "notes": "Handshake the app sends right after connecting; without it some writes are reportedly ignored. Measured on 2026-08-08: writes are applied without ever sending this, so it is not a precondition. It stays unverified because it has no read address — pianoctl can send it but can never confirm it landed."
+    },
+    {
+      "name": "metronome_status",
+      "read_address": "01 00 01 0F",
+      "size": 1,
+      "encoding": "u7",
+      "enum": { "0": "off", "1": "on" },
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "rq1_roundtrip" }
+      ],
+      "notes": "The panel was reported to emit this address unprompted; measured on 2026-08-08 it does not. Toggling the metronome by hand produced no SysEx at all, so this address can only be reached by asking for it."
+    },
+    {
+      "name": "metronome_switch",
+      "write_address": "01 00 03 1A",
+      "size": 1,
+      "encoding": "u7",
+      "enum": { "0": "off", "1": "on", "2": "on_request_next_start" },
+      "verify_with": "metronome_status",
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "write_readback" }
+      ],
+      "notes": "Write-only counterpart of metronome_status. on_request_next_start has no name on the read side, so it can never be shown as already applied."
+    },
+    {
+      "name": "sequencer_tempo",
+      "read_address": "01 00 01 08",
+      "write_address": "01 00 03 09",
+      "size": 2,
+      "encoding": "u14",
+      "range": { "min": 10, "max": 500 },
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "rq1_roundtrip" },
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "write_readback" }
+      ],
+      "notes": "Read and write addresses differ, which is why the map holds a pair rather than one address per parameter."
+    },
+    {
+      "name": "metronome_beat",
+      "read_address": "01 00 02 1F",
+      "write_address": "01 00 02 1F",
+      "size": 1,
+      "encoding": "u7",
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "rq1_roundtrip" },
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "write_readback" }
+      ],
+      "notes": "Deliberately unlabelled: the source contradicts itself about the value table (a sparse mapping in its docs, a plain 0..5 in its code), so naming the values here would invent a fact. Measure it before adding an enum."
+    },
+    {
+      "name": "metronome_pattern",
+      "read_address": "01 00 02 20",
+      "write_address": "01 00 02 20",
+      "size": 1,
+      "encoding": "u7",
+      "range": { "min": 0, "max": 7 },
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "rq1_roundtrip" },
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "write_readback" }
+      ]
+    },
+    {
+      "name": "metronome_volume",
+      "read_address": "01 00 02 21",
+      "write_address": "01 00 02 21",
+      "size": 1,
+      "encoding": "u7",
+      "range": { "min": 0, "max": 10 },
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "rq1_roundtrip" },
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "write_readback" }
+      ],
+      "notes": "0 silences the metronome; 1..10 are the audible steps."
+    },
+    {
+      "name": "metronome_tone",
+      "read_address": "01 00 02 22",
+      "write_address": "01 00 02 22",
+      "size": 1,
+      "encoding": "u7",
+      "enum": { "0": "click", "1": "electronic", "2": "voice_japanese", "3": "voice_english" },
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "rq1_roundtrip" },
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "write_readback" }
+      ]
+    },
+    {
+      "name": "tone_for_single",
+      "read_address": "01 00 02 07",
+      "write_address": "01 00 02 07",
+      "size": 3,
+      "encoding": "raw",
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "rq1_roundtrip" },
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "write_readback" }
+      ],
+      "notes": "[category, number / 128, number % 128]. Left raw rather than modelled as a number, because the category and the number are two fields, not one value."
+    },
+    {
+      "name": "tone_for_split",
+      "read_address": "01 00 02 0A",
+      "write_address": "01 00 02 0A",
+      "size": 3,
+      "encoding": "raw",
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "rq1_roundtrip" },
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "write_readback" }
+      ],
+      "notes": "Same shape as tone_for_single, for the lower half of a split."
+    },
+    {
+      "name": "tone_for_dual",
+      "read_address": "01 00 02 0D",
+      "write_address": "01 00 02 0D",
+      "size": 3,
+      "encoding": "raw",
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "rq1_roundtrip" },
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "write_readback" }
+      ],
+      "notes": "Same shape as tone_for_single, for the layered tone."
+    },
+    {
+      "name": "master_volume",
+      "read_address": "01 00 02 13",
+      "write_address": "01 00 02 13",
+      "size": 1,
+      "encoding": "u7",
+      "range": { "min": 0, "max": 100 },
+      "source": "app_re",
+      "source_ref": "Roland Piano App 1.5.9 RE, via aortegaCampanillas/RolandFP30xController@4492773",
+      "verified": [
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "rq1_roundtrip" },
+        { "firmware": "1C 01 00 00", "date": "2026-08-08", "method": "write_readback" }
+      ],
+      "notes": "0..100, not 0..127: this is the panel's volume, not a MIDI controller. Roland also documents Universal Master Volume for the same job, which needs no address map."
+    }
+  ],
+  "examples": [
+    {
+      "frame": "F0 41 10 00 00 00 28 11 01 00 01 0F 00 00 00 01 6E F7",
+      "note": "metronome_status request (RQ1)"
+    },
+    {
+      "frame": "F0 41 10 00 00 00 28 11 01 00 01 08 00 00 00 02 74 F7",
+      "note": "sequencer_tempo request (RQ1)"
+    },
+    {
+      "frame": "F0 41 10 00 00 00 28 12 01 00 02 13 64 06 F7",
+      "note": "master_volume = 100 (DT1)"
+    },
+    {
+      "frame": "F0 41 10 00 00 00 28 12 01 00 03 06 01 75 F7",
+      "note": "connection handshake (DT1)"
+    }
+  ]
+}
