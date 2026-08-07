@@ -14,5 +14,5 @@ clap.workspace = true
 # ALSA sequencer is Linux-only; the daemon runtime is gated on this target so
 # the workspace still compiles on macOS (development host).
 [target.'cfg(target_os = "linux")'.dependencies]
-alsa = "0.9"
-libc = "0.2"
+alsa.workspace = true
+libc.workspace = true
